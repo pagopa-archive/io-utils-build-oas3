@@ -82,7 +82,8 @@ function renderOperation(method, operationId, operation, specParameters, securit
     const params = {};
     const importedTypes = new Set();
     if (operation.parameters !== undefined) {
-        operation.parameters.forEach(param => {
+        const parameters = operation.parameters.map(p => p);
+        parameters.forEach(param => {
             if (param.name && param.type) {
                 // The parameter description is inline
                 const isRequired = param.required === true;
@@ -90,8 +91,7 @@ function renderOperation(method, operationId, operation, specParameters, securit
                 return;
             }
             // Paratemer is declared as ref, we need to look it up
-            const refInParam = param.$ref ||
-                (param.schema ? param.schema.$ref : undefined);
+            const refInParam = param.$ref || (param.schema ? param.schema.$ref : undefined);
             if (refInParam === undefined) {
                 console.warn(`Skipping param without ref in operation [${operationId}] [${param.name}]`);
                 return;
@@ -129,7 +129,7 @@ function renderOperation(method, operationId, operation, specParameters, securit
     }
     const authHeadersAndParams = operation.security
         ? getAuthHeaders(securityDefinitions, operation.security
-            .map(_ => Object.keys(_)[0])
+            .map((_) => Object.keys(_)[0])
             .filter(_ => _ !== undefined))
         : [];
     const authParams = {};
@@ -203,9 +203,16 @@ function getAuthHeaders(securityDefinitions, securityKeys) {
         .filter(_ => _.e2.in === "header")
         .map(_ => tuples_1.Tuple2(_.e1, _.e2.name));
 }
+function isOpenAPIV2(specs) {
+    return specs.hasOwnProperty("swagger");
+}
+exports.isOpenAPIV2 = isOpenAPIV2;
 function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, strictInterfaces, generateRequestTypes, defaultSuccessType, defaultErrorType, generateResponseDecoders) {
     return __awaiter(this, void 0, void 0, function* () {
         const api = yield SwaggerParser.bundle(specFilePath);
+        if (!isOpenAPIV2(api)) {
+            throw new Error("The specification is not of type swagger 2");
+        }
         const specCode = `
     /* tslint:disable:object-literal-sort-keys */
     /* tslint:disable:no-duplicate-string */
@@ -239,14 +246,14 @@ function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, stri
             // map global auth headers only if global security is defined
             const globalAuthHeaders = api.security
                 ? getAuthHeaders(api.securityDefinitions, api.security
-                    .map(_ => (Object.keys(_).length > 0 ? Object.keys(_)[0] : undefined))
+                    .map((_) => Object.keys(_).length > 0 ? Object.keys(_)[0] : undefined)
                     .filter(_ => _ !== undefined))
                 : [];
             const operationsTypes = Object.keys(api.paths).map(path => {
                 const pathSpec = api.paths[path];
                 const extraParameters = {};
                 if (pathSpec.parameters !== undefined) {
-                    pathSpec.parameters.forEach(param => {
+                    pathSpec.parameters.forEach((param) => {
                         const paramType = param.type;
                         if (paramType) {
                             const paramName = `${param.name}${param.required === true ? "" : "?"}`;
@@ -292,7 +299,7 @@ function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, stri
                 if (op === undefined) {
                     return;
                 }
-                op.e2.forEach(i => operationsImports.add(i));
+                op.e2.forEach((i) => operationsImports.add(i));
                 return op.e1;
             })
                 .join("\n"))
