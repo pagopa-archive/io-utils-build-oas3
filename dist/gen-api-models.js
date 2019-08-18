@@ -82,7 +82,7 @@ function renderOperation(method, operationId, operation, specParameters, securit
     const params = {};
     const importedTypes = new Set();
     if (operation.parameters !== undefined) {
-        const parameters = operation.parameters.map(p => p);
+        const parameters = operation.parameters;
         parameters.forEach(param => {
             if (param.name && param.type) {
                 // The parameter description is inline
@@ -91,7 +91,8 @@ function renderOperation(method, operationId, operation, specParameters, securit
                 return;
             }
             // Paratemer is declared as ref, we need to look it up
-            const refInParam = param.$ref || (param.schema ? param.schema.$ref : undefined);
+            const refInParam = param.$ref ||
+                (param.schema ? param.schema.$ref : undefined);
             if (refInParam === undefined) {
                 console.warn(`Skipping param without ref in operation [${operationId}] [${param.name}]`);
                 return;
@@ -203,15 +204,52 @@ function getAuthHeaders(securityDefinitions, securityKeys) {
         .filter(_ => _.e2.in === "header")
         .map(_ => tuples_1.Tuple2(_.e1, _.e2.name));
 }
+function detectVersion(api) {
+    return api.hasOwnProperty("swagger")
+        ? {
+            definitions: api.definitions,
+            parameters: api.parameters,
+            schemasPath: "#/definitions/",
+            securityPath: api.securityDefinitions,
+            version: api.swagger
+        }
+        : api.hasOwnProperty("openapi")
+            ? {
+                definitions: api.components.schemas,
+                parameters: api.components.parameters,
+                schemasPath: "#/components/schemas/",
+                securityPath: api.components.securitySchemes,
+                version: api.openapi
+            }
+            : {
+                definitions: undefined,
+                parameters: undefined,
+                schemasPath: "",
+                securityPath: undefined,
+                version: ""
+            };
+}
+exports.detectVersion = detectVersion;
 function isOpenAPIV2(specs) {
     return specs.hasOwnProperty("swagger");
 }
 exports.isOpenAPIV2 = isOpenAPIV2;
+function isOpenAPIV3(specs) {
+    return specs.hasOwnProperty("openapi");
+}
+exports.isOpenAPIV3 = isOpenAPIV3;
 function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, strictInterfaces, generateRequestTypes, defaultSuccessType, defaultErrorType, generateResponseDecoders) {
     return __awaiter(this, void 0, void 0, function* () {
         const api = yield SwaggerParser.bundle(specFilePath);
-        if (!isOpenAPIV2(api)) {
-            throw new Error("The specification is not of type swagger 2");
+        const detectedSpecVersion = detectVersion(api);
+        if (isOpenAPIV2(api)) {
+            console.info("The type of spec. is Swagger");
+        }
+        else if (isOpenAPIV3(api)) {
+            console.info("The type of spec. is OpenAPI");
+        }
+        else {
+            throw new Error("The specification is not correct.");
         }
         const specCode = `
     /* tslint:disable:object-literal-sort-keys */
@@ -228,7 +266,8 @@ function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, stri
                 parser: "typescript"
             }));
         }
-        const definitions = api.definitions;
+        const { version, parameters, schemasPath, definitions, securityPath } = detectedSpecVersion;
+        env.addGlobal("schemas_path", schemasPath);
         if (!definitions) {
             console.log("No definitions found, skipping generation of model code.");
             return;
@@ -245,8 +284,8 @@ function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, stri
         if (generateRequestTypes || generateResponseDecoders) {
             // map global auth headers only if global security is defined
             const globalAuthHeaders = api.security
-                ? getAuthHeaders(api.securityDefinitions, api.security
-                    .map((_) => Object.keys(_).length > 0 ? Object.keys(_)[0] : undefined)
+                ? getAuthHeaders(securityPath, api.security
+                    .map(_ => (Object.keys(_).length > 0 ? Object.keys(_)[0] : undefined))
                     .filter(_ => _ !== undefined))
                 : [];
             const operationsTypes = Object.keys(api.paths).map(path => {
@@ -289,7 +328,7 @@ function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, stri
                         console.warn(`Skipping method with missing operationId [${method}]`);
                         return;
                     }
-                    return renderOperation(method, operationId, operation, api.parameters, api.securityDefinitions, globalAuthHeaders.map(_ => _.e2), extraParameters, defaultSuccessType, defaultErrorType, generateResponseDecoders);
+                    return renderOperation(method, operationId, operation, parameters, securityPath, globalAuthHeaders.map(_ => _.e2), extraParameters, defaultSuccessType, defaultErrorType, generateResponseDecoders);
                 });
             });
             const operationsImports = new Set();
@@ -299,7 +338,7 @@ function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, stri
                 if (op === undefined) {
                     return;
                 }
-                op.e2.forEach((i) => operationsImports.add(i));
+                op.e2.forEach(i => operationsImports.add(i));
                 return op.e1;
             })
                 .join("\n"))
