@@ -47,12 +47,21 @@ function uncapitalize(s) {
 }
 function typeFromRef(s) {
     const parts = s.split("/");
+    if (!parts) {
+        return undefined;
+    }
+    // If it's an OAS3, remove the "components" part.
+    if (parts[1] === "components") {
+        parts.splice(1, 1);
+    }
     if (parts && parts.length === 3) {
         const refType = parts[1] === "definitions"
             ? "definition"
-            : parts[1] === "parameters"
-                ? "parameter"
-                : "other";
+            : parts[1] === "schemas"
+                ? "definition"
+                : parts[1] === "parameters"
+                    ? "parameter"
+                    : "other";
         return tuples_1.Tuple2(refType, parts[2]);
     }
     return undefined;
@@ -107,10 +116,14 @@ function renderOperation(method, operationId, operation, specParameters, securit
                 console.warn(`Unrecognized ref type [${refInParam}]`);
                 return;
             }
+            // if the reference type is  "definition"
+            // e2 contains a schema object
+            // otherwise it is the schema name
             const paramType = refType === "definition"
                 ? parsedRef.e2
                 : specParameters
-                    ? specTypeToTs(specParameters[parsedRef.e2].type)
+                    ? specTypeToTs(specParameters[parsedRef.e2].type
+                        || specParameters[parsedRef.e2].schema.type)
                     : undefined;
             if (paramType === undefined) {
                 console.warn(`Cannot resolve parameter ${parsedRef.e2}`);
@@ -147,7 +160,19 @@ function renderOperation(method, operationId, operation, specParameters, securit
     const headersCode = headers.length > 0 ? headers.map(_ => `"${_}"`).join("|") : "never";
     const responses = Object.keys(operation.responses).map(responseStatus => {
         const response = operation.responses[responseStatus];
-        const typeRef = response.schema ? response.schema.$ref : undefined;
+        const media_type = "application/json";
+        const typeRef = 
+        // get schema from Swagger...
+        response.schema
+            ? response.schema.$ref
+            // ... or try with OAS3
+            : response.content
+                ? response.content[media_type]
+                    && response.content[media_type].schema
+                    ? response.content[media_type].schema.$ref
+                    : undefined
+                // Not OAS2 or missing media-type in response.content
+                : undefined;
         const parsedRef = typeRef ? typeFromRef(typeRef) : undefined;
         if (parsedRef !== undefined) {
             importedTypes.add(parsedRef.e2);
