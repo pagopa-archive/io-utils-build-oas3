@@ -93,15 +93,17 @@ function renderOperation(method, operationId, operation, specParameters, securit
     if (operation.parameters !== undefined) {
         const parameters = operation.parameters;
         parameters.forEach(param => {
-            if (param.name && param.type) {
+            if (param.name && getParameterType(param)) {
                 // The parameter description is inline
+                // and the parameter type is not undefined.
                 const isRequired = param.required === true;
-                params[`${param.name}${isRequired ? "" : "?"}`] = specTypeToTs(param.type);
+                params[`${param.name}${isRequired ? "" : "?"}`] = specTypeToTs(getParameterType(param));
                 return;
             }
             // Paratemer is declared as ref, we need to look it up
             const refInParam = param.$ref ||
                 (param.schema ? param.schema.$ref : undefined);
+            console.warn(`parameter as ref or schema ${JSON.stringify(param)}`);
             if (refInParam === undefined) {
                 console.warn(`Skipping param without ref in operation [${operationId}] [${param.name}]`);
                 return;
@@ -121,9 +123,9 @@ function renderOperation(method, operationId, operation, specParameters, securit
             // otherwise it is the schema name
             const paramType = refType === "definition"
                 ? parsedRef.e2
-                : specParameters
-                    ? specTypeToTs(specParameters[parsedRef.e2].type
-                        || specParameters[parsedRef.e2].schema.type)
+                // check that specParameters contain a valid declaration too!
+                : specParameters && getParameterType(specParameters[parsedRef.e2])
+                    ? specTypeToTs(getParameterType(specParameters[parsedRef.e2]))
                     : undefined;
             if (paramType === undefined) {
                 console.warn(`Cannot resolve parameter ${parsedRef.e2}`);
@@ -213,6 +215,16 @@ function renderOperation(method, operationId, operation, specParameters, securit
     return tuples_1.Tuple2(code, importedTypes);
 }
 exports.renderOperation = renderOperation;
+function getParameterType(parameter) {
+    if (!parameter) {
+        return undefined;
+    }
+    return parameter.type
+        ? parameter.type
+        : parameter.schema
+            ? parameter.schema.type
+            : undefined;
+}
 function getAuthHeaders(securityDefinitions, securityKeys) {
     if (securityKeys === undefined && securityDefinitions === undefined) {
         return [];
