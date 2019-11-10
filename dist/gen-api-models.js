@@ -86,10 +86,99 @@ function getDecoderForResponse(status, type) {
             return `r.ioResponseDecoder<${status}, (typeof ${type})["_A"], (typeof ${type})["_O"]>(${status}, ${type})`;
     }
 }
+/** Get the first schema from an OAS3 request or response body
+ */
+function getSchemaFromBody(item) {
+    try {
+        const content = item.content;
+        const media_types = Object.keys(content);
+        if (media_types.length == 0) {
+            console.warn(`Missing media-type in ${JSON.stringify(item)}`);
+            return undefined;
+        }
+        if (media_types.length > 1) {
+            console.warn(`Multiple media-types in ${JSON.stringify(item)}`);
+            return undefined;
+        }
+        const media_type = content[media_types[0]];
+        return "$ref" in media_type.schema ? media_type.schema.$ref : media_type.schema;
+    }
+    catch (_a) {
+        console.warn(`Cannot get schema from body: ${JSON.stringify(item)}`);
+        return undefined;
+    }
+}
+/**
+ * Convert an OAS3 Object to typescript.
+ * This function supports only one level of schema properties:
+ *   for nested schemas define a schema object.
+ */
+function specObjectToTs(item) {
+    if ((item.properties || item.type) == false) {
+        return undefined;
+    }
+    if (item.properties) {
+        item = item.properties;
+        // File upload implementation used in io-utils.
+        const file_upload_schema = { "file": { "type": "string", "format": "binary" } };
+        if (JSON.stringify(item) == JSON.stringify(file_upload_schema)) {
+            console.log(`Found file upload pattern`);
+            return specTypeToTs("file");
+        }
+        for (let p in item) {
+            item[p] = item[p].type;
+        }
+        return JSON.stringify(item).replace(/"/g, " ");
+    }
+    if (item.type) {
+        // Support for generic OAS3 binary file upload
+        // see https://swagger.io/docs/specification/describing-request-body/file-upload/
+        if (item.type == "string" && item.format == "binary") {
+            return specTypeToTs("file");
+        }
+        return specTypeToTs(item.type);
+    }
+}
 function renderOperation(method, operationId, operation, specParameters, securityDefinitions, extraHeaders, extraParameters, defaultSuccessType, defaultErrorType, generateResponseDecoders) {
     const requestType = `r.I${capitalize(method)}ApiRequestType`;
     const params = {};
     const importedTypes = new Set();
+    // Eventually process requestBody
+    if (isV3OperationWithBody(operation) && operation.requestBody !== undefined) {
+        const item = operation.requestBody;
+        const typeRefOrSchema = getSchemaFromBody(item);
+        const isParamRequired = item.required === true;
+        if (typeRefOrSchema) {
+            const inlineRequestBody = specObjectToTs(typeRefOrSchema);
+            // parameter is defined inline
+            if (inlineRequestBody) {
+                const schema = typeRefOrSchema;
+                const parameterName = schema.properties
+                    ? schema.properties.file
+                        ? "file"
+                        : "body"
+                    : "body";
+                params[`${parameterName}${isParamRequired ? "" : "?"}`] = inlineRequestBody;
+            }
+            else { // parameter is in $ref
+                const schema = typeRefOrSchema;
+                const parsedRef = typeRefOrSchema ? typeFromRef(schema) : undefined;
+                console.debug(`requestBody.typeRef ${JSON.stringify({ '1': parsedRef, '2': typeRefOrSchema })}`);
+                if (parsedRef) {
+                    const refType = parsedRef.e1;
+                    const paramName = `${uncapitalize(parsedRef.e2)}${isParamRequired ? "" : "?"}`;
+                    params[paramName] = parsedRef.e2;
+                    if (refType === "definition") {
+                        importedTypes.add(parsedRef.e2);
+                    }
+                }
+            }
+        }
+        else {
+            console.warn(`Cannot extract type from ref [${typeRefOrSchema}]`);
+        }
+    }
+    // Process ordinary parameters
     if (operation.parameters !== undefined) {
         const parameters = operation.parameters;
         parameters.forEach(param => {
@@ -103,7 +192,6 @@ function renderOperation(method, operationId, operation, specParameters, securit
             // Paratemer is declared as ref, we need to look it up
             const refInParam = param.$ref ||
                 (param.schema ? param.schema.$ref : undefined);
-            console.warn(`parameter as ref or schema ${JSON.stringify(param)}`);
             if (refInParam === undefined) {
                 console.warn(`Skipping param without ref in operation [${operationId}] [${param.name}]`);
                 return;
@@ -168,13 +256,7 @@ function renderOperation(method, operationId, operation, specParameters, securit
         response.schema
             ? response.schema.$ref
             // ... or try with OAS3
-            : response.content
-                ? response.content[media_type]
-                    && response.content[media_type].schema
-                    ? response.content[media_type].schema.$ref
-                    : undefined
-                // Not OAS2 or missing media-type in response.content
-                : undefined;
+            : getSchemaFromBody(response);
         const parsedRef = typeRef ? typeFromRef(typeRef) : undefined;
         if (parsedRef !== undefined) {
             importedTypes.add(parsedRef.e2);
@@ -275,6 +357,10 @@ function isOpenAPIV3(specs) {
     return specs.hasOwnProperty("openapi");
 }
 exports.isOpenAPIV3 = isOpenAPIV3;
+function isV3OperationWithBody(item) {
+    return item.hasOwnProperty("requestBody");
+}
+exports.isV3OperationWithBody = isV3OperationWithBody;
 function generateApi(env, specFilePath, definitionsDirPath, tsSpecFilePath, strictInterfaces, generateRequestTypes, defaultSuccessType, defaultErrorType, generateResponseDecoders) {
     return __awaiter(this, void 0, void 0, function* () {
         const api = yield SwaggerParser.bundle(specFilePath);

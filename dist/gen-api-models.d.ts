@@ -14,5 +14,6 @@ export declare function detectVersion(api: any): {
 };
 export declare function isOpenAPIV2(specs: OpenAPI.Document): specs is OpenAPIV2.Document;
 export declare function isOpenAPIV3(specs: OpenAPI.Document): specs is OpenAPIV3.Document;
+export declare function isV3OperationWithBody(item: any): item is OpenAPIV3.OperationObject;
 export declare function generateApi(env: nunjucks.Environment, specFilePath: string, definitionsDirPath: string, tsSpecFilePath: string | undefined, strictInterfaces: boolean, generateRequestTypes: boolean, defaultSuccessType: string, defaultErrorType: string, generateResponseDecoders: boolean): Promise<void>;
 export declare function initNunJucksEnvironment(): nunjucks.Environment;
